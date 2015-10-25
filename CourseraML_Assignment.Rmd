@@ -1,0 +1,115 @@
+---
+title: "Activity Quality Prediction from Activity Monitor Data"
+author: "Graham Spinks"
+date: "October 25, 2015"
+output: html_document
+---
+
+##Overview
+
+In this analysis we make a prediction about the quality of personal activity based on data from accelerometers on the belt, forearm, arm and dumbbell of 6 participants.
+
+The data for this project originate from this source: http://groupware.les.inf.puc-rio.br/har. 
+
+
+##Loading and preparing the data
+
+```{r, echo=FALSE}
+ setwd("/home/g/R/workDir/Coursera08_ML/Assignment")
+```
+
+First we load the data and libraries. We also load what we will call the final testing set, for which we want the predict the values after we make our model.
+
+```{r}
+library('caret')
+data <- read.table("../AssignmentData/pml-training.csv", sep=",", header=TRUE)
+finalTesting <- read.table("../AssignmentData/pml-testing.csv", sep=",", header=TRUE)
+```
+
+
+Looking at the dimensions of the data, we notice 19622 observations in our dataset with 160 columns.
+
+```{r}
+dim(data)
+```
+
+The outcome we would like to predict is the 'classe' column. It refers to the manner in which the activity was performed. 
+
+```{r}
+summary(data$classe)
+```
+
+We notice some issues with data quality, as there are a lot of missing values in some columns. As this would most likely lead to a wrong prediction, we will get rid of the columns with bad data quality. 
+
+We get rid of all columns that only consist of missing values and see that no missing values remain in the rest of the dataset. 
+
+```{r}
+badCols <- apply(data,2,function(x) ( sum(is.na(x)))) > 15000
+data <- data[,!badCols]
+finalTesting <- finalTesting[,!badCols]
+badCols <- apply(data,2,function(x) ( sum(x==""))) > 15000
+data <- data[,!badCols]
+finalTesting <- finalTesting[,!badCols]
+sum(apply(data,2,function(x) (sum(is.na(x)) + sum(x==""))) )
+```
+
+Next notice that columns 1 through 7 don't relate to sensor meetings but to observation tags that shouldn't be used with the prediction. Thus we through out these columns as well.
+
+```{r}
+head(data[,1:7])
+data <- data[,8:ncol(data)]
+finalTesting <- finalTesting[,8:ncol(finalTesting)]
+```
+
+##CrossValidation & Modelbuilding
+
+First we make a training and test set in order to evaluate our model and to make sure we are not overfitting.
+
+```{r}
+set.seed(642987)
+inTrain <- createDataPartition(y=data$classe, p=0.7, list=FALSE)
+training <- data[inTrain,]
+testing <- data[-inTrain,]
+```
+
+Our algorithm of choice is the Random Forest Algorithm. In order to estimate the out of sample error, we perform a 5-fold crossvalidation. We achieve this by setting the traincontrol parameters for the train function in the caret package.
+
+Note that the random forest model implements bootstrapping as a standard option, however we are now explicitely forcing a 5-fold crossvalidation for the purposes of this exercise.
+
+In order to limit the time of training the model, we use parallel processing and limit the amount of trees to 50.
+
+```{r}
+library('doParallel')
+cl <- makeCluster(detectCores())
+registerDoParallel(cl)
+set.seed(645641)
+modelFit <- train(classe ~., method="rf", ntree=50, data=training, prox=FALSE, trControl = trainControl(method="repeatedcv", number=5, repeats=5))
+stopCluster(cl)
+
+modelFit
+```
+
+We see that the accuracy of our model on our training set is roughly 0.988. However this might be slightly overfitted. In order to know the out of sample error rate, we will use the model to predict the outcome of the testing set. Note that this is a good estimate for the out of sample error since none of that date of the testing set is used for the training. Note that if we accidentally overfitted our data we expect the accuracy of our prediction to drop significantly.
+
+```{r}
+confMatrix <- confusionMatrix(testing$classe, predict(modelFit, testing))
+confMatrix
+OOSError <- 1 - confMatrix$overall[1]
+```
+
+So we see we reach an accuracy of more than 0.99. The out of sample error rate is thus less than 1%. We can interpret this as the error of our model that is not inherent to the data that was used for training. We also conclude that our model didn't overfit the training data.
+
+We now use our model to predict the outcomes of the finalTesting data set for our assigment.
+
+```{r}
+finalOutcome <- predict(modelFit, finalTesting)
+finalOutcome
+```
+
+After uploading our answers we find that all predictions are correct.
+
+##Conclusion
+
+We used a randomForest model to predict the quality of personal activity based on sensor data. We determined that the estimate for our out of sample error rate was less than 1%, using a 5-fold cross validation for our random forest model.
+
+
